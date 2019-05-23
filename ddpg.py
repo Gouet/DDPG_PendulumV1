@@ -82,12 +82,12 @@ class Actor():
         self.batch_size = batch_size
 
         # Actor Network
-        self.inputs, self.out, self.scaled_out = self.create_actor_network()
+        self.inputs, self.out = self.create_actor_network()
 
         self.network_params = tf.trainable_variables()
 
         # Target Network
-        self.target_inputs, self.target_out, self.target_scaled_out = self.create_actor_network()
+        self.target_inputs, self.target_out = self.create_actor_network()
 
         self.target_network_params = tf.trainable_variables()[
             len(self.network_params):]
@@ -104,7 +104,7 @@ class Actor():
 
         # Combine the gradients here
         self.unnormalized_actor_gradients = tf.gradients(
-            self.scaled_out, self.network_params, -self.action_gradient)
+            self.out, self.network_params, -self.action_gradient)
         self.actor_gradients = list(map(lambda x: tf.div(x, self.batch_size), self.unnormalized_actor_gradients))
 
         # Optimization Op
@@ -115,20 +115,18 @@ class Actor():
             self.network_params) + len(self.target_network_params)
 
     def create_actor_network(self):
-        inputs = tflearn.input_data(shape=[None, self.s_dim])
-        net = tflearn.fully_connected(inputs, 400)
-        net = tflearn.layers.normalization.batch_normalization(net)
-        net = tflearn.activations.relu(net)
-        net = tflearn.fully_connected(net, 300)
-        net = tflearn.layers.normalization.batch_normalization(net)
-        net = tflearn.activations.relu(net)
+        inputs = tf.keras.layers.Input(shape=(self.s_dim,))
+        net = tf.keras.layers.Dense(400)(inputs)
+        net = tf.keras.layers.BatchNormalization()(net)
+        net = tf.keras.layers.Activation(tf.nn.relu)(net)
+        net = tf.keras.layers.Dense(300)(net)
+        net = tf.keras.layers.BatchNormalization()(net)
+        net = tf.keras.layers.Activation(tf.nn.relu)(net)
+        
         # Final layer weights are init to Uniform[-3e-3, 3e-3]
         w_init = tflearn.initializations.uniform(minval=-0.003, maxval=0.003)
-        out = tflearn.fully_connected(
-            net, self.a_dim, activation='tanh', weights_init=w_init)
-        # Scale output to -action_bound to action_bound
-        scaled_out = tf.multiply(out, self.action_bound)
-        return inputs, out, scaled_out
+        out = tf.keras.layers.Dense(self.a_dim, activation='tanh', kernel_initializer=w_init)(net)
+        return inputs, out
 
     def train(self, inputs, a_gradient):
         self.sess.run(self.optimize, feed_dict={
@@ -137,12 +135,12 @@ class Actor():
         })
     
     def predict(self, inputs):
-        return self.sess.run(self.scaled_out, feed_dict={
+        return self.sess.run(self.out, feed_dict={
             self.inputs: inputs
         })
 
     def predict_target(self, inputs):
-        return self.sess.run(self.target_scaled_out, feed_dict={
+        return self.sess.run(self.target_out, feed_dict={
             self.target_inputs: inputs
         })
 
@@ -194,24 +192,25 @@ class Critic():
         self.action_grads = tf.gradients(self.out, self.action)
 
     def create_critic_network(self):
-        inputs = tflearn.input_data(shape=[None, self.s_dim])
-        action = tflearn.input_data(shape=[None, self.a_dim])
-        net = tflearn.fully_connected(inputs, 400)
-        net = tflearn.layers.normalization.batch_normalization(net)
-        net = tflearn.activations.relu(net)
+        #inputs = tflearn.input_data(shape=[None, self.s_dim])
+        #action = tflearn.input_data(shape=[None, self.a_dim])
+        inputs = tf.keras.layers.Input(shape=(self.s_dim,))
+        action = tf.keras.layers.Input(shape=(self.a_dim,))
+        net = tf.keras.layers.Dense(400)(inputs)
+        net = tf.keras.layers.BatchNormalization()(net)
+        net = tf.keras.layers.Activation(tf.nn.relu)(net)
 
         # Add the action tensor in the 2nd hidden layer
         # Use two temp layers to get the corresponding weights and biases
-        t1 = tflearn.fully_connected(net, 300)
-        t2 = tflearn.fully_connected(action, 300)
-
-        net = tflearn.activation(
-            tf.matmul(net, t1.W) + tf.matmul(action, t2.W) + t2.b, activation='relu')
-
+        t1 = tf.keras.layers.Dense(300, use_bias=False)(net)
+        t2 = tf.keras.layers.Dense(300)(action)
+ 
+        net = tf.keras.layers.Activation(tf.nn.relu)(tf.keras.layers.Add()([t1, t2]))
+ 
         # linear layer connected to 1 output representing Q(s,a)
         # Weights are init to Uniform[-3e-3, 3e-3]
         w_init = tflearn.initializations.uniform(minval=-0.003, maxval=0.003)
-        out = tflearn.fully_connected(net, 1, weights_init=w_init)
+        out = tf.keras.layers.Dense(1, kernel_initializer=w_init)(net)
         return inputs, action, out
 
     def train(self, inputs, action, predicted_q_value):

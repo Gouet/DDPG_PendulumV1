@@ -3,6 +3,7 @@ import time
 import tensorflow as tf
 import numpy as np
 import ddpg
+from tensorflow.python.saved_model import tag_constants
 
 env = gym.make('Pendulum-v0')
 
@@ -34,7 +35,7 @@ def train(actor, critic, action, reward, state, state2, done):
     critic.update_target_network()
 
     buffer.add(np.reshape(state, (3,)),
-        np.reshape(action, (2,)),
+        np.reshape(action, (1,)),
         reward,
         done,
         np.reshape(state2, (3,)))
@@ -44,7 +45,8 @@ def train(actor, critic, action, reward, state, state2, done):
         s_batch, a_batch, r_batch, t_batch, s2_batch = buffer.sample_batch(batch_size)
 
         # Calculate targets
-        target_q = critic.predict_target(s2_batch, actor.predict_target(s2_batch))
+        a = actor.predict_target(s2_batch)
+        target_q = critic.predict_target(s2_batch, a)
 
         yi = []
         #print(r_batch)
@@ -67,14 +69,19 @@ def train(actor, critic, action, reward, state, state2, done):
 
 
 with tf.Session() as sess:
-    actor = ddpg.Actor(sess,  3, 2, np.array([-2, 2]), 0.0001, 0.001, 64)
+    actor = ddpg.Actor(sess,  3, 1, 2, 0.0001, 0.001, 64)
 
-    critic = ddpg.Critic(sess,  3, 2, 0.001, 0.001, 0.99, actor.get_num_trainable_vars())
+    critic = ddpg.Critic(sess,  3, 1, 0.001, 0.001, 0.99, actor.get_num_trainable_vars())
 
     summary_ops, summary_vars = build_summaries()
 
     sess.run(tf.global_variables_initializer())
 
+    saver = tf.train.Saver()
+    try:
+        saver.restore(sess, "save/model.ckpt")
+    except Exception as e:
+        print('ERROR LOAD')
 
     writer = tf.summary.FileWriter('./logs', sess.graph)
 
@@ -89,9 +96,12 @@ with tf.Session() as sess:
         while not done:
             env.render()
 
-            a = actor.predict(obs.reshape((1, 3))) + ou()
+            noise = ou()
+            a = actor.predict(obs.reshape((1, 3)))
+            a = a * 2
+            a += noise
 
-            obs2, reward, done, info = env.step(a[0])
+            obs2, reward, done, info = env.step(a)
 
             total_reward += reward
 
@@ -101,13 +111,19 @@ with tf.Session() as sess:
             #print(reward)
             #time.sleep(0.5)
         print('average_max_q: ', ep_ave_max_q_value / float(j), 'reward: ', total_reward, 'episode:', episode)
-        summary_str = sess.run(summary_ops, feed_dict={
-                    summary_vars[0]: total_reward,
-                    summary_vars[1]: ep_ave_max_q_value / float(j)
-                })
+        saver = tf.train.Saver()
+        saver.save(sess, 'save/model.ckpt')
 
-        writer.add_summary(summary_str, episode)
-        writer.flush()
+        try:
+            summary_str = sess.run(summary_ops, feed_dict={
+                        summary_vars[0]: tf.constant(total_reward),
+                        summary_vars[1]: tf.constant(ep_ave_max_q_value / float(j))
+                    })
+
+            #writer.add_summary(summary_str, episode)
+            #writer.flush()
+        except Exception as e:
+            print(e.__repr__)
 
 
 env.close()
