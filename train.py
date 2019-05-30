@@ -4,6 +4,14 @@ import numpy as np
 import tensorflow as tf
 tf.enable_eager_execution()
 import ddpg
+import os
+
+try:  
+    os.mkdir('./saved')
+except OSError:  
+    print ("Creation of the directory failed")
+else:  
+    print ("Successfully created the directory")
 
 print(tf.__version__)
 env = gym.make('Pendulum-v0')
