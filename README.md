@@ -11,4 +11,5 @@ Tensorflow 1.13.1
 python train.py
 
 **Result after 100 episodes**
-![Alt Text](https://media.giphy.com/media/vFKqnCdLPNOKc/giphy.gif)
+
+![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif)
