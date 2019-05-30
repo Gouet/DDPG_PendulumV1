@@ -14,7 +14,7 @@ python train.py
 
 <img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif" width="400" height="300">
 
-**Graph**
+**Tensorboard**
 
 <img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/reward.png" width="400" height="300">
 
