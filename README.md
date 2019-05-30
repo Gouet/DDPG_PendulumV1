@@ -9,3 +9,6 @@ Tensorflow 1.13.1
 
 **Launch:**
 python train.py
+
+**Result after 100 episodes**
+![Alt Text](https://media.giphy.com/media/vFKqnCdLPNOKc/giphy.gif)
