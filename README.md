@@ -15,8 +15,7 @@ python train.py
 ![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif)
 
 **Graph**
+
 ![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/reward.png)
-
-
 
 ![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/av_q_max.png)
