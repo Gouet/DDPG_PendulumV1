@@ -1,8 +1,8 @@
 import tensorflow as tf
+tf.enable_eager_execution()
 from collections import deque
 import random
 import numpy as np
-import tflearn
 
 
 class ReplayBuffer(object):
@@ -36,11 +36,11 @@ class ReplayBuffer(object):
         else:
             batch = random.sample(self.buffer, batch_size)
 
-        s_batch = np.array([_[0] for _ in batch], dtype='float32')
-        a_batch = np.array([_[1] for _ in batch], dtype='float32')
+        s_batch = np.array([_[0][0] for _ in batch], dtype='float32')
+        a_batch = np.array([_[1][0] for _ in batch], dtype='float32')
         r_batch = np.array([_[2] for _ in batch])
         t_batch = np.array([_[3] for _ in batch])
-        s2_batch = np.array([_[4] for _ in batch], dtype='float32')
+        s2_batch = np.array([_[4][0] for _ in batch], dtype='float32')
 
         return s_batch, a_batch, r_batch, t_batch, s2_batch
 
@@ -72,171 +72,129 @@ class OrnsteinUhlenbeckActionNoise:
 
 
 class Actor():
-    def __init__(self, sess, state_dim, action_dim, action_bound, learning_rate, tau, batch_size):
-        self.sess = sess
-        self.s_dim = state_dim
-        self.a_dim = action_dim
-        self.action_bound = action_bound
-        self.learning_rate = learning_rate
-        self.tau = tau
-        self.batch_size = batch_size
+    def __init__(self, filename='./saved/actor.h5'):
+        self.filename = filename
 
-        # Actor Network
-        self.inputs, self.out = self.create_actor_network()
+        w = tf.initializers.random_uniform(-0.003, 0.003)
+        self.input = tf.keras.layers.Input(shape=(3,))
 
-        self.network_params = tf.trainable_variables()
+        x = tf.keras.layers.Dense(400)(self.input)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Activation(tf.nn.relu)(x)
+        x = tf.keras.layers.Dense(300)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Activation(tf.nn.relu)(x)
 
-        # Target Network
-        self.target_inputs, self.target_out = self.create_actor_network()
+        out = tf.keras.layers.Dense(1, activation='tanh', kernel_initializer=w, bias_initializer=w)(x)
+        out = tf.keras.layers.Lambda(lambda x: x * 2)(out)
 
-        self.target_network_params = tf.trainable_variables()[
-            len(self.network_params):]
+        self.model = tf.keras.Model(inputs=[self.input], outputs=out)
 
-        # Op for periodically updating target network with online network
-        # weights
-        self.update_target_network_params = \
-            [self.target_network_params[i].assign(tf.multiply(self.network_params[i], self.tau) +
-                                                  tf.multiply(self.target_network_params[i], 1. - self.tau))
-                for i in range(len(self.target_network_params))]
+        self.batch_size = 64
 
-        # This gradient will be provided by the critic network
-        self.action_gradient = tf.placeholder(tf.float32, [None, self.a_dim])
+        self.model.summary()
 
-        # Combine the gradients here
-        self.unnormalized_actor_gradients = tf.gradients(
-            self.out, self.network_params, -self.action_gradient)
-        self.actor_gradients = list(map(lambda x: tf.div(x, self.batch_size), self.unnormalized_actor_gradients))
+        self.optimizer = tf.train.AdamOptimizer(0.0001)
 
-        # Optimization Op
-        self.optimize = tf.train.AdamOptimizer(self.learning_rate).\
-            apply_gradients(zip(self.actor_gradients, self.network_params))
+    def save(self):
+        self.model.save_weights(self.filename)
 
-        self.num_trainable_vars = len(
-            self.network_params) + len(self.target_network_params)
+    def load(self):
+        self.model.load_weights(self.filename)
 
-    def create_actor_network(self):
-        inputs = tf.keras.layers.Input(shape=(self.s_dim,))
-        net = tf.keras.layers.Dense(400)(inputs)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation(tf.nn.relu)(net)
-        net = tf.keras.layers.Dense(300)(net)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation(tf.nn.relu)(net)
-        
-        # Final layer weights are init to Uniform[-3e-3, 3e-3]
-        w_init = tflearn.initializations.uniform(minval=-0.003, maxval=0.003)
-        out = tf.keras.layers.Dense(self.a_dim, activation='tanh', kernel_initializer=w_init)(net)
-        return inputs, out
+    def train_step(self, state, action_gradients):
+        newState = tf.constant(state)
+        with tf.GradientTape() as tape:
+            predictions = self.model(newState)
+            
+        gradient = tape.gradient(predictions, self.model.trainable_variables, -action_gradients)
 
-    def train(self, inputs, a_gradient):
-        self.sess.run(self.optimize, feed_dict={
-            self.inputs: inputs,
-            self.action_gradient: a_gradient
-        })
-    
-    def predict(self, inputs):
-        return self.sess.run(self.out, feed_dict={
-            self.inputs: inputs
-        })
+        actor_gradients = list(map(lambda x: tf.math.divide(x, self.batch_size), gradient))
 
-    def predict_target(self, inputs):
-        return self.sess.run(self.target_out, feed_dict={
-            self.target_inputs: inputs
-        })
-
-    def update_target_network(self):
-        self.sess.run(self.update_target_network_params)
-
-    def get_num_trainable_vars(self):
-        return self.num_trainable_vars
+        self.optimizer.apply_gradients(zip(actor_gradients, self.model.trainable_variables))
 
 class Critic():
-    def __init__(self, sess, state_dim, action_dim, learning_rate, tau, gamma, num_actor_vars):
-        self.sess = sess
-        self.s_dim = state_dim
-        self.a_dim = action_dim
-        self.learning_rate = learning_rate
-        self.tau = tau
-        self.gamma = gamma
+    def __init__(self, filename='./saved/critic.h5'):
+        self.filename = filename
+        w = tf.initializers.random_uniform(-0.003, 0.003)
+        self.input = tf.keras.layers.Input(shape=(3,))
 
-        # Create the critic network
-        self.inputs, self.action, self.out = self.create_critic_network()
+        x = tf.keras.layers.Dense(400)(self.input)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Activation(tf.nn.relu)(x)
+        x = tf.keras.layers.Dense(300)(x)
 
-        self.network_params = tf.trainable_variables()[num_actor_vars:]
+        self.input_action = tf.keras.layers.Input(shape=(1,))
+        self.y = tf.keras.layers.Dense(300)(self.input_action)
 
-        # Target Network
-        self.target_inputs, self.target_action, self.target_out = self.create_critic_network()
+        add = tf.keras.layers.Add()([x, self.y])
+        merge = tf.keras.layers.Activation(tf.nn.relu)(add)
 
-        self.target_network_params = tf.trainable_variables()[(len(self.network_params) + num_actor_vars):]
+        out = tf.keras.layers.Dense(1, kernel_initializer=w, bias_initializer=w)(merge)
 
-        # Op for periodically updating target network with online network
-        # weights with regularization
-        self.update_target_network_params = \
-            [self.target_network_params[i].assign(tf.multiply(self.network_params[i], self.tau) \
-            + tf.multiply(self.target_network_params[i], 1. - self.tau))
-                for i in range(len(self.target_network_params))]
+        self.model = tf.keras.Model(inputs=[self.input, self.input_action], outputs=out)
 
-        # Network target (y_i)
-        self.predicted_q_value = tf.placeholder(tf.float32, [None, 1])
+        self.batch_size = 64
 
-        # Define loss and optimization Op
-        self.loss = tflearn.mean_square(self.predicted_q_value, self.out)
-        self.optimize = tf.train.AdamOptimizer(
-            self.learning_rate).minimize(self.loss)
+        self.model.summary()
 
-        # Get the gradient of the net w.r.t. the action.
-        # For each action in the minibatch (i.e., for each x in xs),
-        # this will sum up the gradients of each critic output in the minibatch
-        # w.r.t. that action. Each output is independent of all
-        # actions except for one.
-        self.action_grads = tf.gradients(self.out, self.action)
+        self.optimizer = tf.train.AdamOptimizer(0.001)
 
-    def create_critic_network(self):
-        #inputs = tflearn.input_data(shape=[None, self.s_dim])
-        #action = tflearn.input_data(shape=[None, self.a_dim])
-        inputs = tf.keras.layers.Input(shape=(self.s_dim,))
-        action = tf.keras.layers.Input(shape=(self.a_dim,))
-        net = tf.keras.layers.Dense(400)(inputs)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation(tf.nn.relu)(net)
+    def train_step(self, state, action, predicted_q_value):
+        newState = tf.constant(state)
+        newAction = tf.constant(action)
+        with tf.GradientTape() as tape:
 
-        # Add the action tensor in the 2nd hidden layer
-        # Use two temp layers to get the corresponding weights and biases
-        t1 = tf.keras.layers.Dense(300, use_bias=False)(net)
-        t2 = tf.keras.layers.Dense(300)(action)
- 
-        net = tf.keras.layers.Activation(tf.nn.relu)(tf.keras.layers.Add()([t1, t2]))
- 
-        # linear layer connected to 1 output representing Q(s,a)
-        # Weights are init to Uniform[-3e-3, 3e-3]
-        w_init = tflearn.initializations.uniform(minval=-0.003, maxval=0.003)
-        out = tf.keras.layers.Dense(1, kernel_initializer=w_init)(net)
-        return inputs, action, out
+            predictions = self.model([newState, newAction])
 
-    def train(self, inputs, action, predicted_q_value):
-        return self.sess.run([self.out, self.optimize], feed_dict={
-            self.inputs: inputs,
-            self.action: action,
-            self.predicted_q_value: predicted_q_value
-        })
+            loss = tf.losses.mean_squared_error(predictions, predicted_q_value)
 
-    def predict(self, inputs, action):
-        return self.sess.run(self.out, feed_dict={
-            self.inputs: inputs,
-            self.action: action
-        })
+        gradient = tape.gradient(loss, self.model.trainable_variables)
 
-    def predict_target(self, inputs, action):
-        return self.sess.run(self.target_out, feed_dict={
-            self.target_inputs: inputs,
-            self.target_action: action
-        })
+        self.optimizer.apply_gradients(zip(gradient, self.model.trainable_variables))
+        return predictions
 
-    def action_gradients(self, inputs, actions):
-        return self.sess.run(self.action_grads, feed_dict={
-            self.inputs: inputs,
-            self.action: actions
-        })
+    def save(self):
+        self.model.save_weights(self.filename)
 
-    def update_target_network(self):
-        self.sess.run(self.update_target_network_params)
+    def load(self):
+        self.model.load_weights(self.filename)
+
+    def actor_gradient(self, state, actor):
+        newState = tf.constant(state)
+        with tf.GradientTape(persistent=True) as tape:
+            actions = actor.model(newState)
+            predictions = self.model([newState, actions])
+
+        gradient = tape.gradient(predictions, actions)
+        return gradient
+
+
+class TargetActor(Actor):
+    def __init__(self):
+        super().__init__('./saved/target_actor.h5')
+        self.tau = 0.001
+
+    def hard_copy(self, actor_var):
+        [self.model.trainable_variables[i].assign(actor_var[i])
+                for i in range(len(self.model.trainable_variables))]
+
+    def update(self, actor_var):
+        [self.model.trainable_variables[i].assign(tf.multiply(actor_var[i], self.tau) \
+            + tf.multiply(self.model.trainable_variables[i], 1. - self.tau))
+                for i in range(len(self.model.trainable_variables))]
+
+class TargetCritic(Critic):
+    def __init__(self):
+        super().__init__('./saved/target_critic.h5')
+        self.tau = 0.001
+
+    def hard_copy(self, critic_var):
+        [self.model.trainable_variables[i].assign(critic_var[i])
+                for i in range(len(self.model.trainable_variables))]
+
+    def update(self, critic_var):
+        [self.model.trainable_variables[i].assign(tf.multiply(critic_var[i], self.tau) \
+            + tf.multiply(self.model.trainable_variables[i], 1. - self.tau))
+                for i in range(len(self.model.trainable_variables))]
+

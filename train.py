@@ -1,130 +1,105 @@
 import gym
 import time
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+tf.enable_eager_execution()
 import ddpg
-from tensorflow.python.saved_model import tag_constants
 
+print(tf.__version__)
 env = gym.make('Pendulum-v0')
 
-#target_actor.update(actor.model.trainable_variables)
-#target_critic.update(critic.model.trainable_variables)
+critic = ddpg.Critic()
+actor = ddpg.Actor()
+target_critic = ddpg.TargetCritic()
+target_actor = ddpg.TargetActor()
 
-ou = ddpg.OrnsteinUhlenbeckActionNoise(mu=np.zeros(1))
+try:
+    critic.load()
+    actor.load()
+except Exception as e:
+    print(e.__repr__)
+
+target_actor.hard_copy(actor.model.trainable_variables)
+target_critic.hard_copy(critic.model.trainable_variables)
+
+ou = ddpg.OrnsteinUhlenbeckActionNoise(mu=np.zeros(1,))
 buffer = ddpg.ReplayBuffer(100000)
 global ep_ave_max_q_value
 ep_ave_max_q_value = 0
 global total_reward
 total_reward = 0
 
-def build_summaries():
-    episode_reward = tf.Variable(0.)
-    tf.summary.scalar("Reward", episode_reward)
-    episode_ave_max_q = tf.Variable(0.)
-    tf.summary.scalar("Qmax Value", episode_ave_max_q)
+def create_tensorboard():
+    global_step = tf.train.get_or_create_global_step()
 
-    summary_vars = [episode_reward, episode_ave_max_q]
-    summary_ops = tf.summary.merge_all()
+    logdir = "./logs/"
+    writer = tf.contrib.summary.create_file_writer(logdir)
+    writer.set_as_default()
+    return global_step, writer
 
-    return summary_ops, summary_vars
+global global_step
+global_step, writer = create_tensorboard()
 
-def train(actor, critic, action, reward, state, state2, done):
+def train(action, reward, state, state2, done):
     global ep_ave_max_q_value
-
-    actor.update_target_network()
-    critic.update_target_network()
-
-    buffer.add(np.reshape(state, (3,)),
-        np.reshape(action, (1,)),
-        reward,
-        done,
-        np.reshape(state2, (3,)))
+    
+    buffer.add(state, action, reward, done, state2)
     batch_size = 64
 
     if buffer.size() > batch_size:
         s_batch, a_batch, r_batch, t_batch, s2_batch = buffer.sample_batch(batch_size)
 
-        # Calculate targets
-        a = actor.predict_target(s2_batch)
-        target_q = critic.predict_target(s2_batch, a)
+        target_action2 = target_actor.model.predict(s2_batch)
+        predicted_q_value = target_critic.model.predict([s2_batch, target_action2])
 
         yi = []
-        #print(r_batch)
         for i in range(batch_size):
             if t_batch[i]:
                 yi.append(r_batch[i])
             else:
-                yi.append(r_batch[i] + 0.99 * target_q[i])
+                yi.append(r_batch[i] + 0.99 * predicted_q_value[i])
 
-        ave_max_q, _ = critic.train(s_batch, a_batch, np.reshape(yi, (batch_size, 1)))
+        predictions = critic.train_step(s_batch, a_batch, yi)
 
-        ep_ave_max_q_value += np.amax(ave_max_q)
+        ep_ave_max_q_value += np.amax(predictions)
+
+        grad = critic.actor_gradient(s_batch, actor)
+        actor.train_step(s_batch, grad)
+
+        target_actor.update(actor.model.trainable_variables)
+        target_critic.update(critic.model.trainable_variables)
+
+for episode in range(10000):
+    global_step.assign_add(1)
+
+    obs = env.reset()
+    done = False
+    j = 0
+    ep_ave_max_q_value = 0
+    total_reward = 0
+    while not done:
+        env.render()
+        obs = obs.reshape((1, 3))
+
+        noise = ou()
+        action = actor.model.predict(obs)
+
+        action = action + noise
+
+        obs2, reward, done, info = env.step(action)
+        total_reward += reward
+
+        train(action, reward, obs, obs2.reshape((1, 3)), done)
+        obs = obs2
+        j += 1
+
+    with writer.as_default(), tf.contrib.summary.always_record_summaries():
+        tf.contrib.summary.scalar("average_max_q", ep_ave_max_q_value / float(j))
+        tf.contrib.summary.scalar("reward", total_reward)
+    
+    critic.save()
+    actor.save()
         
-        a_outs = actor.predict(s_batch)
-        grads = critic.action_gradients(s_batch, a_outs)
-        actor.train(s_batch, grads[0])
-
-        actor.update_target_network()
-        critic.update_target_network()
-
-
-with tf.Session() as sess:
-    actor = ddpg.Actor(sess,  3, 1, 2, 0.0001, 0.001, 64)
-
-    critic = ddpg.Critic(sess,  3, 1, 0.001, 0.001, 0.99, actor.get_num_trainable_vars())
-
-    summary_ops, summary_vars = build_summaries()
-
-    sess.run(tf.global_variables_initializer())
-
-    saver = tf.train.Saver()
-    try:
-        saver.restore(sess, "save/model.ckpt")
-    except Exception as e:
-        print('ERROR LOAD')
-
-    writer = tf.summary.FileWriter('./logs', sess.graph)
-
-
-    for episode in range(10000):
-        obs = env.reset()
-        done = False
-        j = 0
-        ep_ave_max_q_value = 0
-        total_reward = 0
-
-        while not done:
-            env.render()
-
-            noise = ou()
-            a = actor.predict(obs.reshape((1, 3)))
-            a = a * 2
-            a += noise
-
-            obs2, reward, done, info = env.step(a)
-
-            total_reward += reward
-
-            train(actor, critic, a, reward, obs, obs2, done)
-            obs = obs2
-            j += 1
-            #print(reward)
-            #time.sleep(0.5)
-        print('average_max_q: ', ep_ave_max_q_value / float(j), 'reward: ', total_reward, 'episode:', episode)
-        saver = tf.train.Saver()
-        saver.save(sess, 'save/model.ckpt')
-
-        try:
-            summary_str = sess.run(summary_ops, feed_dict={
-                        summary_vars[0]: tf.constant(total_reward),
-                        summary_vars[1]: tf.constant(ep_ave_max_q_value / float(j))
-                    })
-
-            #writer.add_summary(summary_str, episode)
-            #writer.flush()
-        except Exception as e:
-            print(e.__repr__)
-
+    print('average_max_q: ', ep_ave_max_q_value / float(j), 'reward: ', total_reward, 'episode:', episode)
 
 env.close()
-print('STOP')
