@@ -12,10 +12,10 @@ python train.py
 
 **Result after 100 episodes**
 
-![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif =250x250)
+![](https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif =250x250)
 
 **Graph**
 
-![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/reward.png =250x250)
+![](https://github.com/Gouet/DDPG_PendulumV1/blob/master/reward.png =250x250)
 
-![Alt Text](https://github.com/Gouet/DDPG_PendulumV1/blob/master/av_q_max.png =250x250)
+![](https://github.com/Gouet/DDPG_PendulumV1/blob/master/av_q_max.png =250x250)
