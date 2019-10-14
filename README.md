@@ -16,6 +16,6 @@ python train.py
 
 **Tensorboard**
 
-<img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/reward.png" width="400" height="300">
+<img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/rewards.png" width="400" height="300">
 
 <img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/av_q_max.png" width="400" height="300">
