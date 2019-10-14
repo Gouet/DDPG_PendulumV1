@@ -6,6 +6,8 @@ tf.enable_eager_execution()
 import ddpg
 import os
 
+TRAIN_MODE = False
+
 try:  
     os.mkdir('./saved')
 except OSError:  
@@ -86,18 +88,21 @@ for episode in range(10000):
     ep_ave_max_q_value = 0
     total_reward = 0
     while not done:
-        env.render()
+        if not TRAIN_MODE:
+            env.render()
         obs = obs.reshape((1, 3))
-
+        
         noise = ou()
         action = actor.model.predict(obs)
 
-        action = action + noise
+        if TRAIN_MODE:
+            action = action + noise
 
         obs2, reward, done, info = env.step(action)
         total_reward += reward
 
-        train(action, reward, obs, obs2.reshape((1, 3)), done)
+        if TRAIN_MODE:
+            train(action, reward, obs, obs2.reshape((1, 3)), done)
         obs = obs2
         j += 1
 
@@ -105,9 +110,10 @@ for episode in range(10000):
         tf.contrib.summary.scalar("average_max_q", ep_ave_max_q_value / float(j))
         tf.contrib.summary.scalar("reward", total_reward)
     
-    critic.save()
-    actor.save()
+    if TRAIN_MODE:
+        critic.save()
+        actor.save()
         
-    print('average_max_q: ', ep_ave_max_q_value / float(j), 'reward: ', total_reward, 'episode:', episode)
+        print('average_max_q: ', ep_ave_max_q_value / float(j), 'reward: ', total_reward, 'episode:', episode)
 
 env.close()
