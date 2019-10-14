@@ -10,7 +10,7 @@ Tensorflow 1.13.1
 **Launch:**
 python train.py
 
-**Result after 100 episodes**
+**Result after 1000 episodes**
 
 <img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/pendulum_works.gif" width="400" height="300">
 
