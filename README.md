@@ -18,4 +18,4 @@ python train.py
 
 <img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/rewards.PNG" width="400" height="300">
 
-<img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/av_q_max.PNG" width="400" height="300">
+<img src="https://github.com/Gouet/DDPG_PendulumV1/blob/master/images/average_q_max.PNG" width="400" height="300">
