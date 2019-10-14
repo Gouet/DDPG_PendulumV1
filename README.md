@@ -1,8 +1,8 @@
-** Youtube **
+# Youtube
 
 https://www.youtube.com/watch?v=Cnqdgg_NJOs
 
-** Pendulum **
+# Pendulum
 
 Pendenlum from GYM : https://gym.openai.com/
 
